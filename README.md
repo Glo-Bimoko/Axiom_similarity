@@ -135,7 +135,7 @@ The `testing_data/` directory contains example files:
 
 If you use this pipeline in your research, please cite:
 - Nextflow: Di Tommaso, P. et al. (2017). Nextflow enables reproducible computational workflows. Nature Biotechnology, 35(4), 316-319.
-- This pipeline: [Your citation information here]
+
 
 ## License
 
