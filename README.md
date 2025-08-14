@@ -1,4 +1,4 @@
-# Axiom Match
+# Axiom Match/Similarity
 
 A Nextflow-based pipeline for processing and comparing genetic genotype data from Axiom microarray chips. This pipeline extracts genotype call codes from multiple sample files and calculates pairwise similarity percentages between samples.
 
@@ -31,11 +31,9 @@ The Axiom Match pipeline is designed to:
 ```
 axiom_match/
 ├── main.nf                 # Main Nextflow pipeline
-├── nextflow.config         # Nextflow configuration
 ├── bin/
 │   ├── parse_axiom.py     # Script to parse Axiom genotype files
 │   └── compare_genos.py   # Script to compare genotypes (legacy)
-├── testing_data/          # Example input files
 └── results/               # Output directory (created after running)
 ```
 
@@ -141,12 +139,5 @@ If you use this pipeline in your research, please cite:
 
 ## License
 
-[Add your license information here]
+GNU General Public License V3
 
-## Contact
-
-For questions or issues, please contact: [Your contact information]
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues, feature requests, or pull requests. 
