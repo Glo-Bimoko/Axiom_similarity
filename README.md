@@ -96,9 +96,9 @@ nextflow run main.nf --input './batch19/*.CEL.txt' --outdir './batch19_results'
 ### Similarity Results Format
 
 ```
-GX094 vs GX095: 98.23%
-GX094 vs TY010519967: 97.56%
-GX095 vs TY010519967: 99.01%
+Test_sample1 vs Test_sample3: 98.23%
+Test_sample2 vs Test_sample3: 97.56%
+Test_sample3 vs Test_sample1: 99.01%
 ```
 
 ## Configuration
@@ -127,9 +127,9 @@ cd work/
 ## Example Data
 
 The `testing_data/` directory contains example files:
-- `20250604_GX094.CEL.txt`
-- `20250604_GX095.CEL.txt` 
-- `20250604_TY010519967.CEL.txt`
+- `Test_sample1.CEL.txt`
+- `Test_sample2.CEL.txt` 
+- `Test_sample3.CEL.txt`
 
 ## Citation
 
