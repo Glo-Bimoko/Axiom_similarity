@@ -21,13 +21,11 @@ def main():
         if infile.suffix.lower() in [".xlsx", ".xls"]:
             raw = pd.read_excel(infile, header=None, dtype=str)
         else:
-            # For text files, read line by line to handle metadata lines
             with open(infile, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
 
             print(f"File has {len(lines)} lines")
 
-            # Find the data start (first line that doesn't start with ##)
             data_start = 0
             for i, line in enumerate(lines):
                 if not line.strip().startswith('##'):
@@ -39,21 +37,18 @@ def main():
                 print("ERROR: No data found after metadata lines")
                 sys.exit(1)
 
-            # Write clean data to temporary file
             with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as tmp_file:
-                # Write data lines (skip metadata)
                 for line in lines[data_start:]:
                     tmp_file.write(line)
                 tmp_filename = tmp_file.name
 
             try:
-                # Read the cleaned data with pandas (compatible with older pandas versions)
-                raw = pd.read_csv(tmp_filename, sep='\t', dtype=str, error_bad_lines=False, warn_bad_lines=False)
-                print(f"Successfully read cleaned file with shape: {raw.shape}")
+                raw = pd.read_csv(tmp_filename, sep='\t', dtype=str, on_bad_lines='warn')
+            except TypeError:
+                raw = pd.read_csv(tmp_filename, sep='\t', dtype=str,
+                                  error_bad_lines=False, warn_bad_lines=False)
             except Exception as e:
                 print(f"Error reading with pandas: {e}")
-                print("Trying alternative approach...")
-                # Fallback: read manually and create dataframe
                 with open(tmp_filename, 'r') as f:
                     clean_lines = []
                     header = None
@@ -68,58 +63,86 @@ def main():
                         elif len(parts) == expected_cols:
                             clean_lines.append(parts)
                         else:
-                            print(f"Skipping malformed line {line_num + 1}: expected {expected_cols} fields, got {len(parts)}")
-                
+                            print(f"Skipping malformed line {line_num + 1}: "
+                                  f"expected {expected_cols} fields, got {len(parts)}")
                 if header and clean_lines:
                     raw = pd.DataFrame(clean_lines, columns=header)
-                    print(f"Manually created dataframe with shape: {raw.shape}")
                 else:
                     raise Exception("No valid data found")
             finally:
-                # Clean up temporary file
                 Path(tmp_filename).unlink()
 
         print(f"Data shape: {raw.shape}")
         print(f"Columns: {list(raw.columns)}")
 
-        # Find genotype column
-        geno_cols = [c for c in raw.columns if GENO_COL_RE.match(str(c))]
+        # --- Detect array type from annotation column ---
+        array_type = "unknown"
+        # Re-read metadata lines to find annotation file
+        with open(infile, 'r', encoding='utf-8') as f:
+            for line in f:
+                if line.startswith('##annotation-file'):
+                    if 'PMDA' in line:
+                        array_type = 'PMDA'
+                    elif '3x4' in line or '3X4' in line:
+                        array_type = '3x4'
+                    break
+        print(f"Array type detected: {array_type}")
 
+        # --- Find rsID column ---
+        # Try exact match first, then case-insensitive
+        rsid_col = None
+        for candidate in ["extended_rsid", "rsid", "RS ID", "rsID", "snp_id"]:
+            if candidate in raw.columns:
+                rsid_col = candidate
+                break
+        if rsid_col is None:
+            # Case-insensitive fallback
+            for col in raw.columns:
+                if 'rsid' in col.lower() or 'rs_id' in col.lower():
+                    rsid_col = col
+                    break
+        if rsid_col is None:
+            print("ERROR: Could not find an rsID column.")
+            print(f"Available columns: {list(raw.columns)}")
+            sys.exit(1)
+        print(f"Found rsID column: '{rsid_col}'")
+
+        # --- Find genotype call column ---
+        geno_cols = [c for c in raw.columns if GENO_COL_RE.match(str(c))]
         if not geno_cols:
-            print("ERROR: Could not find genotype column matching pattern '*.CEL_call_code'")
-            print("Available columns:")
+            print("ERROR: Could not find genotype column matching '*.CEL_call_code'")
             for col in raw.columns:
                 print(f"  - {col}")
             sys.exit(1)
 
         geno_col = geno_cols[0]
-        print(f"Found genotype column: {geno_col}")
+        print(f"Found genotype column: '{geno_col}'")
 
-        # Extract sample ID
         match = GENO_COL_RE.match(geno_col)
-        if match:
-            sample_id = match.group(1)
-        else:
-            # Fallback: use filename without extension
-            sample_id = infile.stem.replace('.CEL', '')
-
+        sample_id = match.group(1) if match else infile.stem.replace('.CEL', '')
         print(f"Sample ID: {sample_id}")
 
-        # Extract and rename column
-        result_df = raw[[geno_col]].rename(columns={geno_col: sample_id}).copy()
+        # --- Build output: rsid + genotype, index on rsid ---
+        result_df = raw[[rsid_col, geno_col]].copy()
+        result_df = result_df.rename(columns={rsid_col: "rsid", geno_col: sample_id})
 
-        # Remove any rows with missing genotype calls
         initial_rows = len(result_df)
-        result_df = result_df.dropna()
-        final_rows = len(result_df)
 
-        print(f"Rows: {initial_rows} -> {final_rows} (removed {initial_rows - final_rows} missing)")
+        # Drop rows with no rsID — these are array QC probes (e.g. AFFX-QC-*)
+        # that have no biological meaning and no cross-array identity
+        result_df = result_df[result_df["rsid"].notna()]
+        result_df = result_df[~result_df["rsid"].str.strip().isin(["", "---", "NA", "N/A"])]
+        no_rsid_dropped = initial_rows - len(result_df)
+        print(f"Dropped {no_rsid_dropped} probes with no rsID (QC/control probes)")
 
-        # Save result
-        result_df.to_csv(outfile, sep="\t", index=False)
+        # Keep NaN genotype calls — don't drop them here.
+        # The comparison step will skip NaN calls per pair.
+        result_df = result_df.set_index("rsid")
+
+        print(f"Final rows (SNPs with rsID): {len(result_df)}")
+        result_df.to_csv(outfile, sep="\t", index=True)
         print(f"Output saved to: {outfile}")
-        if len(result_df) > 0:
-            print(f"First few genotype calls: {result_df.iloc[:5, 0].tolist()}")
+        print(f"First few rows:\n{result_df.head()}")
 
     except Exception as e:
         print(f"ERROR processing {infile}: {str(e)}")
